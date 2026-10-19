@@ -11,12 +11,7 @@
 #include <unistd.h>
 #include <vector>
 
-/* ── Merge helper ────────────────────────────────────────────────────────── */
-
-static void merge(std::vector<StaticLibInfo>& found_,
-                  const std::string&          name_,
-                  const std::string&          version_,
-                  const std::string&          method_) {
+static void merge(std::vector<StaticLibInfo>& found_, const std::string& name_, const std::string& version_, const std::string& method_) {
     for (auto& e : found_) {
         if (e._name == name_) {
             if (e._version.empty() && !version_.empty()) {
@@ -29,26 +24,15 @@ static void merge(std::vector<StaticLibInfo>& found_,
     found_.push_back({name_, version_, method_, ""});
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * 1. Symbol collection
- *
- * Read SHT_SYMTAB and SHT_DYNSYM once; all detection strategies share the
- * resulting vector to avoid iterating the ELF symbol tables multiple times.
- *
- * Note on stripped binaries: SHT_SYMTAB is removed by strip(1), but
- * SHT_DYNSYM survives in shared libraries and PIE executables.  A fully
- * static binary stripped to the bare minimum will have neither table,
- * leaving byte-pattern scanning as the only applicable strategy.
- * ════════════════════════════════════════════════════════════════════════════ */
-
-static void collect_symbols(Elf*                      elf_,
-                             std::vector<std::string>& names_) {
+static void collect_symbols(Elf* elf_, std::vector<std::string>& names_) {
     Elf_Scn* scn = nullptr;
+
     while ((scn = elf_nextscn(elf_, scn)) != nullptr) {
         GElf_Shdr shdr;
         if (gelf_getshdr(scn, &shdr) == nullptr) {
             continue;
         }
+
         if (shdr.sh_type != SHT_SYMTAB && shdr.sh_type != SHT_DYNSYM) {
             continue;
         }
@@ -69,6 +53,7 @@ static void collect_symbols(Elf*                      elf_,
             if (gelf_getsym(data, (int)i, &sym) == nullptr) {
                 continue;
             }
+            
             const char* name = elf_strptr(elf_, shdr.sh_link, sym.st_name);
             if (name != nullptr && *name != '\0') {
                 names_.emplace_back(name);
@@ -77,21 +62,14 @@ static void collect_symbols(Elf*                      elf_,
     }
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * 2. Byte-pattern database  (binwalk-style)
- *
- * Known magic byte sequences are searched in ELF data sections
- * (.rodata, .data, .data.rel.ro, .data1).  False-positive rate is kept low
- * by restricting the scan to data-bearing, non-executable sections and by
- * preferring patterns of 4+ bytes.  Two-byte zlib headers are deliberately
- * kept because they carry unusually distinctive low-byte distributions
- * (only four valid (CMF, FLG) pairs satisfy the RFC 1950 checksum).
- * ════════════════════════════════════════════════════════════════════════════ */
-
+/* 
+  Byte-pattern database  (binwalk-style)
+  Known magic byte sequences are searched in ELF data sections (.rodata, .data, .data.rel.ro, .data1).  
+*/
 struct ByteSig {
-    const char*    lib;
+    const char* lib;
     const uint8_t* pattern;
-    size_t         len;
+    size_t len;
 };
 
 /* zlib RFC-1950 CMF+FLG pairs */
@@ -178,9 +156,6 @@ static const uint8_t PAT_HDF5[] = {
     0x89, 0x48, 0x44, 0x46, 0x0D, 0x0A, 0x1A, 0x0A
 };
 
-/* Cap'n Proto stream framing: 4-byte segment count header (value 0 = 1 seg) */
-/* Too generic alone; rely on symbol detection for capnproto */
-
 static const ByteSig BYTE_SIGS[] = {
     /* compression */
     { "zlib",      PAT_ZLIB_DEF,    2  },
@@ -226,8 +201,7 @@ static const ByteSig BYTE_SIGS[] = {
  * patterns above.  Restricting to non-executable data sections reduces
  * false positives compared to scanning the whole binary file.
  */
-static void scan_byte_sigs(Elf*                   elf_,
-                            std::set<std::string>& found_) {
+static void scan_byte_sigs(Elf* elf_, std::set<std::string>& found_) {
     size_t shstrndx = 0;
     elf_getshdrstrndx(elf_, &shstrndx);
 
@@ -249,10 +223,10 @@ static void scan_byte_sigs(Elf*                   elf_,
 
         const char* sname = elf_strptr(elf_, shstrndx, shdr.sh_name);
         if (sname != nullptr) {
-            if (strcmp(sname, ".rodata")      != 0 &&
-                strcmp(sname, ".data")        != 0 &&
-                strcmp(sname, ".data.rel.ro") != 0 &&
-                strcmp(sname, ".data1")       != 0) {
+            if ((strcmp(sname, ".rodata") != 0) &&
+                (strcmp(sname, ".data") != 0) &&
+                (strcmp(sname, ".data.rel.ro") != 0) &&
+                (strcmp(sname, ".data1") != 0)) {
                 continue;
             }
         }
@@ -269,6 +243,7 @@ static void scan_byte_sigs(Elf*                   elf_,
             if (size < sig->len || found_.count(sig->lib)) {
                 continue;
             }
+
             const uint8_t* end = buf + size - sig->len + 1;
             for (const uint8_t* p = buf; p < end; p++) {
                 if (memcmp(p, sig->pattern, sig->len) == 0) {
@@ -280,13 +255,6 @@ static void scan_byte_sigs(Elf*                   elf_,
     }
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * 3. Symbol-cluster fingerprinting  (Detect-It-Easy / FLIRT-style)
- *
- * C libraries and older C++ libraries without distinctive namespace prefixes
- * are identified by counting characteristic function name occurrences.
- * ════════════════════════════════════════════════════════════════════════════ */
-
 struct SymCluster {
     const char*        lib;
     int                threshold;
@@ -294,7 +262,7 @@ struct SymCluster {
 };
 
 static const char* SYMS_OPENSSL[] = {
-    "SSL_CTX_new", "SSL_new", "SSL_connect", "SSL_read", "SSL_write",
+    "SSL_CTX_new","SSL_new", "SSL_connect", "SSL_read", "SSL_write",
     "EVP_EncryptInit_ex", "EVP_DecryptInit_ex", "EVP_DigestInit_ex",
     "BN_new", "BN_free", "RSA_new", "EC_KEY_new",
     "CRYPTO_malloc", "CRYPTO_free", "ERR_get_error",
@@ -648,27 +616,6 @@ static void scan_symbol_clusters(const std::vector<std::string>& names_,
     }
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * 4. C++ namespace prefix fingerprinting  (Itanium ABI, a la Detect-It-Easy)
- *
- * In the Itanium C++ ABI (used on all Linux/ELF targets), a symbol in
- * namespace foo::Bar is mangled as _ZN<len>foo<len>Bar...  The namespace
- * length-prefix is deterministic, so "_ZN4llvm" matches any symbol in the
- * LLVM namespace and constitutes strong evidence that LLVM is linked.
- *
- * This is the primary detection strategy for C++ libraries (LLVM, absl,
- * RocksDB, …) where individual function names are unstable across versions
- * but the namespace is constant.
- *
- * Caveat — recompiled static libraries:
- *   A statically linked library is typically a custom build that may differ
- *   from the system package in version, configuration, and patches.  Namespace
- *   prefix matches confirm presence with high confidence but carry NO reliable
- *   version information.  Do NOT infer the version from the host system's
- *   package manager for these detections; use the "pkg-inferred" method label
- *   (assigned in infer_versions_from_pkg) as a reminder of this uncertainty.
- * ════════════════════════════════════════════════════════════════════════════ */
-
 struct NsSig {
     const char* lib;
     /* Itanium mangled prefix: "_ZN" + len(ns) + ns  (case-sensitive) */
@@ -676,15 +623,6 @@ struct NsSig {
     int         threshold;
 };
 
-/*
- * Itanium mangling cheatsheet used to build this table:
- *   namespace foo        → _ZN3foo        (3 = strlen("foo"))
- *   namespace foo::bar   → _ZN3foo3bar    (3+3)
- *   class Foo            → _ZN3Foo        (same as namespace)
- *
- * A match on the prefix alone is sufficient: any symbol that starts with
- * "_ZN4llvm" must belong to the llvm:: namespace tree.
- */
 static const NsSig NS_SIGS[] = {
     /* ── LLVM ecosystem ───────────────────────────────────────────────── */
     /* "llvm" = 4 chars */
@@ -808,12 +746,7 @@ static void scan_cxx_namespaces(const std::vector<std::string>& names_,
     }
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * Public interface
- * ════════════════════════════════════════════════════════════════════════════ */
-
-void scan_signatures(const std::string&         path_,
-                     std::vector<StaticLibInfo>& found_) {
+void scan_signatures(const std::string& path_, std::vector<StaticLibInfo>& found_) {
     if (elf_version(EV_CURRENT) == EV_NONE) {
         return;
     }
@@ -847,17 +780,7 @@ void scan_signatures(const std::string&         path_,
     for (const auto& lib : byte_hits) {
         merge(found_, lib, "", "byte-sig");
     }
-
-    /*
-     * Symbol-based results (clusters + C++ namespace prefixes).
-     *
-     * Important: these detections carry NO version information.  The version
-     * may later be filled by infer_versions_from_pkg() using the host system's
-     * package database, but for a statically linked library this is unreliable:
-     * the linked version was typically built from source and may differ from
-     * anything the package manager knows about.  The method will be changed to
-     * "pkg-inferred" by that pass to make the uncertainty visible.
-     */
+    
     for (const auto& lib : cluster_hits) {
         merge(found_, lib, "", "symbol-cluster");
     }

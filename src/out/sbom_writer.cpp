@@ -37,11 +37,11 @@ static std::string json_esc(const std::string& s_) {
 }
 
 /* Write a single JSON property using fputs for the value (avoids % issues). */
-static void jprop(FILE* fp_, int indent_, const char* key_,
-                   const std::string& val_, bool comma_ = true) {
+static void jprop(FILE* fp_, int indent_, const char* key_, const std::string& val_, bool comma_ = true) {
     for (int i = 0; i < indent_; i++) {
         fputc(' ', fp_);
     }
+
     fprintf(fp_, "\"%s\": \"", key_);
     fputs(json_esc(val_).c_str(), fp_);
     fputs(comma_ ? "\",\n" : "\"\n", fp_);
@@ -49,7 +49,7 @@ static void jprop(FILE* fp_, int indent_, const char* key_,
 
 static std::string utc_now() {
     time_t t = time(nullptr);
-    char buf[32];
+    char buf[32] = {0};
     strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", gmtime(&t));
     return buf;
 }
@@ -60,13 +60,14 @@ static std::string new_uuid() {
     for (int i = 0; i < 16; i++) {
         b[i] = (unsigned char)(rand_r(&seed) & 0xff);
     }
+
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
     char buf[37];
-    snprintf(buf, sizeof(buf),
-        "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-        b[0],b[1],b[2],b[3], b[4],b[5], b[6],b[7],
-        b[8],b[9], b[10],b[11],b[12],b[13],b[14],b[15]);
+
+    snprintf(buf, sizeof(buf), "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                                b[0],b[1],b[2],b[3], b[4],b[5], b[6],b[7],
+                                b[8],b[9], b[10],b[11],b[12],b[13],b[14],b[15]);
     return buf;
 }
 
@@ -78,50 +79,42 @@ static const char* cdx_type(ElfType t_) {
     }
 }
 
-static std::map<std::string, int>
-make_idx(const std::vector<std::string>& order) {
+static std::map<std::string, int> make_idx(const std::vector<std::string>& order) {
     std::map<std::string, int> m;
     for (int i = 0; i < (int)order.size(); i++) {
         m[order[i]] = i;
     }
+
     return m;
 }
 
-/* Return a stable numeric bom-ref (fallback when no PURL available). */
-static std::string num_ref(const std::string& path_,
-                             const std::map<std::string, int>& idx_) {
+static std::string num_ref(const std::string& path_, const std::map<std::string, int>& idx_) {
     auto it = idx_.find(path_);
-    char buf[32];
+    char buf[32] = {0};
     snprintf(buf, sizeof(buf), "comp-%d", it != idx_.end() ? it->second : -1);
     return buf;
 }
 
-static std::string spdx_ref(const std::string& path_,
-                              const std::map<std::string, int>& idx_) {
+static std::string spdx_ref(const std::string& path_, const std::map<std::string, int>& idx_) {
     auto it = idx_.find(path_);
-    char buf[40];
-    snprintf(buf, sizeof(buf), "SPDXRef-comp-%d",
-             it != idx_.end() ? it->second : -1);
+    char buf[40] = {0};
+    snprintf(buf, sizeof(buf), "SPDXRef-comp-%d", (it != idx_.end()) ? it->second : -1);
     return buf;
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * CycloneDX 1.6 — component block writer
- *
- * Cyberwatch requirements (confirmed from official adapter):
- *   - bom-ref  = purl when available (enables PURL-based dep graph)
- *   - purl     = typed PURL for CVE matching (pkg:deb, pkg:rpm, pkg:generic…)
- *   - cpe      = CPE 2.3 when deterministic  (secondary matching)
- *   - name     = package-manager name preferred over soname
- *   - version  = package-manager version preferred
- *   - type     = "library" | "application" | "operating-system"
- * ════════════════════════════════════════════════════════════════════════════ */
+/* 
+  CycloneDX 1.6 — component block writer
+ 
+  Cyberwatch requirements (confirmed from official adapter):
+    - bom-ref  = purl when available (enables PURL-based dep graph)
+    - purl     = typed PURL for CVE matching (pkg:deb, pkg:rpm, pkg:generic…)
+    - cpe      = CPE 2.3 when deterministic  (secondary matching)
+    - name     = package-manager name preferred over soname
+    - version  = package-manager version preferred
+    - type     = "library" | "application" | "operating-system"
+ */
 
-static void write_cdx_component(FILE* fp_,
-                                  const Component& c_,
-                                  const std::string& ref_,
-                                  const std::string& purl_,
-                                  const std::string& cpe_) {
+static void write_cdx_component(FILE* fp_, const Component& c_, const std::string& ref_, const std::string& purl_, const std::string& cpe_) {
     /* Use package-manager name for CVE matching when available */
     const std::string& display_name = c_._pkg_name.empty() ? c_._name : c_._pkg_name;
     const std::string& version      = c_._pkg_version;
@@ -161,9 +154,9 @@ static void write_cdx_component(FILE* fp_,
 
     /* CycloneDX licenses array */
     if (!c_._license.empty()) {
-        bool is_expr = (c_._license.find(" OR ")   != std::string::npos ||
-                        c_._license.find(" AND ")  != std::string::npos ||
-                        c_._license.find(" WITH ") != std::string::npos);
+        bool is_expr = ((c_._license.find(" OR ") != std::string::npos) ||
+                        (c_._license.find(" AND ") != std::string::npos) ||
+                        (c_._license.find(" WITH ") != std::string::npos));
         fputs("      \"licenses\": [{\n", fp_);
         if (is_expr) {
             fputs("        \"expression\": \"", fp_);
@@ -198,9 +191,7 @@ static void write_cdx_component(FILE* fp_,
     /* One property per statically-detected library (version + method) */
     for (const auto& sl : c_._static_libs) {
         std::string key = "elf:static_lib:" + sl._name;
-        std::string val = sl._version.empty()
-                          ? sl._method
-                          : (sl._version + " [" + sl._method + "]");
+        std::string val = sl._version.empty() ? sl._method : (sl._version + " [" + sl._method + "]");
         prop(key.c_str(), val, true);
     }
 
@@ -210,15 +201,14 @@ static void write_cdx_component(FILE* fp_,
     fputs("      ]\n    }", fp_);
 }
 
-/* Write a static library as a standalone CycloneDX component.
- * These only appear when the version is known (needed for CVE matching). */
+/* Write a static library as a standalone CycloneDX component. These only appear when the version is known (needed for CVE matching). */
 static void write_cdx_static_lib(FILE* fp_,
                                    const StaticLibInfo& sl_,
                                    const std::string& parent_path_) {
     std::string purl = make_static_purl(sl_);
     std::string cpe  = make_cpe(sl_._name, sl_._version);
     if (purl.empty()) {
-        return;   /* no version → not actionable */
+        return;   /* no version  */
     }
 
     fputs("    {\n", fp_);
@@ -231,11 +221,13 @@ static void write_cdx_static_lib(FILE* fp_,
     fprintf(fp_, "      \"purl\": \"");
     fputs(json_esc(purl).c_str(), fp_);
     fputs("\",\n", fp_);
+
     if (!cpe.empty()) {
         fprintf(fp_, "      \"cpe\": \"");
         fputs(json_esc(cpe).c_str(), fp_);
         fputs("\",\n", fp_);
     }
+
     if (!sl_._license.empty()) {
         bool is_expr = (sl_._license.find(" OR ")  != std::string::npos ||
                         sl_._license.find(" AND ") != std::string::npos);
@@ -251,6 +243,7 @@ static void write_cdx_static_lib(FILE* fp_,
         }
         fputs("      }],\n", fp_);
     }
+
     fputs("      \"properties\": [\n", fp_);
     fprintf(fp_, "        { \"name\": \"elf:link_type\",   \"value\": \"static\" },\n");
     fprintf(fp_, "        { \"name\": \"elf:detected_by\", \"value\": \"");
@@ -285,15 +278,7 @@ static void write_cdx_os_component(FILE* fp_, const OsRelease& os_,
     fputs("      ]\n    }", fp_);
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * CycloneDX 1.6 metadata block (shared)
- * ════════════════════════════════════════════════════════════════════════════ */
-
-static void write_cdx_header(FILE* fp_,
-                               const std::string& ts_,
-                               const std::string& uuid_,
-                               const std::string& device_name_,
-                               const std::string& device_version_) {
+static void write_cdx_header(FILE* fp_, const std::string& ts_, const std::string& uuid_, const std::string& device_name_, const std::string& device_version_) {
     fprintf(fp_,
         "{\n"
         "  \"bomFormat\":    \"CycloneDX\",\n"
@@ -324,49 +309,29 @@ static void write_cdx_header(FILE* fp_,
         json_esc(device_version_).c_str());
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * Build PURL map for an ordered component list
- * ════════════════════════════════════════════════════════════════════════════ */
+using PurlMap = std::map<std::string, std::string>; 
 
-using PurlMap = std::map<std::string, std::string>; /* path → purl-or-num-ref */
-
-/*
- * Build the bom-ref map: path → "comp-N" (always unique within the document).
- *
- * bom-ref must be unique per CycloneDX spec §4.4.  Multiple ELF files can
- * belong to the same dpkg/rpm package (e.g. libc.so.6 and ld-linux.so both
- * belong to libc6), so using the PURL as bom-ref would create duplicates.
- * The PURL is stored separately in the component's "purl" field for CVE
- * matching — that field may repeat across components without issue.
- */
-static PurlMap build_purl_map(const std::vector<std::string>& order_,
-                                const std::map<std::string, Component>&,
-                                const OsRelease&) {
+static PurlMap build_purl_map(const std::vector<std::string>& order_, const std::map<std::string, Component>&, const OsRelease&) {
     PurlMap m;
     auto idx = make_idx(order_);
     for (const auto& path : order_) {
-        m[path] = num_ref(path, idx);   /* comp-N — always unique */
+        m[path] = num_ref(path, idx);   /* comp-N always unique */
     }
     return m;
 }
 
-/* ── Version-warning helpers ────────────────────────────────────────────── */
-
 /*
- * One entry = one (elf_path, StaticLibInfo) pair.
- *
- * Deduplication key: (elf_path, lib_name) — same library without version in
- * two different ELF files produces TWO entries.  Same library seen multiple
- * times inside the same ELF is collapsed to one.
- */
+  One entry = one (elf_path, StaticLibInfo) pair.
+ 
+  Deduplication key: (elf_path, lib_name) = same library without version in two different ELF files produces 2 entries.  
+  Same library seen multiple times inside the same ELF is collapsed to one.
+*/
 struct NoVersionEntry {
     std::string   elf_path;   /* absolute path of the containing ELF */
     StaticLibInfo lib;
 };
 
-static std::vector<NoVersionEntry>
-collect_no_version_libs(const std::vector<std::string>& order,
-                         const std::map<std::string, Component>& comps) {
+static std::vector<NoVersionEntry> collect_no_version_libs(const std::vector<std::string>& order, const std::map<std::string, Component>& comps) {
     std::set<std::string> seen; /* key = elf_path + '\0' + lib_name */
     std::vector<NoVersionEntry> result;
 
@@ -385,38 +350,33 @@ collect_no_version_libs(const std::vector<std::string>& order,
     return result;
 }
 
-/* Return just the filename from an absolute path. */
 static const char* basename_of(const std::string& p_) {
     auto pos = p_.rfind('/');
     return (pos == std::string::npos) ? p_.c_str() : p_.c_str() + pos + 1;
 }
 
 /*
- * Emit version warnings.
- *   is_text = true  → write to fp (end of text report)
- *   is_text = false → write to stderr (during CycloneDX/SPDX generation)
- *
- * Each entry shows the ELF binary where the version-less lib was detected.
- * If the same lib appears in two different ELFs, two lines are printed.
+  Emit version warnings.
+    is_text = true  → write to fp (end of text report)
+    is_text = false → write to stderr (during CycloneDX/SPDX generation)
+ 
+  Each entry shows the ELF binary where the version-less lib was detected.
+  If the same lib appears in two different ELFs, two lines are printed.
  */
-static void emit_version_warnings(const std::vector<NoVersionEntry>& no_ver_,
-                                   FILE* fp_, bool is_text_) {
+static void emit_version_warnings(const std::vector<NoVersionEntry>& no_ver_, FILE* fp_, bool is_text_) {
     if (no_ver_.empty()) {
         return;
     }
 
     if (is_text_) {
         fputs("=======================================================\n"
-              "  WARNINGS — libraries with unknown version\n"
+              "       WARNINGS — libraries with unknown version\n"
               "=======================================================\n"
-              "The following statically-detected libraries have no version\n"
-              "information.  They cannot be emitted as standalone SBOM\n"
-              "components (no PURL/CPE → no CVE matching possible).\n\n", fp_);
+              "The following statically-detected libraries have no version information. They cannot be emitted as standalone SBOM components (no PURL/CPE → no CVE matching possible).\n\n", fp_);
         for (const auto& e : no_ver_) {
-            fprintf(fp_, "  [!] %-25s  [%s]  in: %s",
-                    e.lib._name.c_str(),
-                    e.lib._method.c_str(),
-                    e.elf_path.c_str());
+            fprintf(fp_, "  [!] %-25s  [%s]  in: %s",  e.lib._name.c_str(),
+                                                       e.lib._method.c_str(),
+                                                       e.elf_path.c_str());
             if (!e.lib._license.empty()) {
                 fprintf(fp_, "  license: %s", e.lib._license.c_str());
             }
@@ -425,36 +385,28 @@ static void emit_version_warnings(const std::vector<NoVersionEntry>& no_ver_,
         fputc('\n', fp_);
     } else {
         for (const auto& e : no_ver_) {
-            fprintf(stderr,
-                "[WARN] static '%s' has no version"
-                " (detected by: %s, in: %s)"
-                " — cannot be matched to CVEs\n",
-                e.lib._name.c_str(),
-                e.lib._method.c_str(),
-                basename_of(e.elf_path));
+            fprintf(stderr, "[WARN] static '%s' has no version detected by: %s, in: %s) - cannot be matched to CVEs\n", e.lib._name.c_str(),
+                                                                                                                        e.lib._method.c_str(),
+                                                                                                                        basename_of(e.elf_path));
         }
     }
 }
 
-/* ── Licence-gap helpers ─────────────────────────────────────────────────── */
 
 /*
- * A component (dynamic or static) for which no licence could be determined.
+  A component (dynamic or static) for which no licence could be determined.
  */
 struct LicenseGap {
     std::string _name;
-    std::string _version;    /* may be empty */
+    std::string _version;    // may be empty 
     bool        is_static;
-    std::string _method;     /* detection method, for static libs */
+    std::string _method;     // detection method, for static libs 
 };
 
 /*
- * Collect every dynamic component and every static lib entry that has no
- * licence.  Results are deduplicated by a (kind, name, version) key.
+  Collect every dynamic component and every static lib entry that has no licence
  */
-static std::vector<LicenseGap>
-collect_license_gaps(const std::vector<std::string>& order,
-                      const std::map<std::string, Component>& comps) {
+static std::vector<LicenseGap> collect_license_gaps(const std::vector<std::string>& order, const std::map<std::string, Component>& comps) {
     std::set<std::string> seen;
     std::vector<LicenseGap> result;
 
@@ -484,9 +436,9 @@ collect_license_gaps(const std::vector<std::string>& order,
 }
 
 /*
- * Emit licence-gap warnings.
- *   is_text = true  → write to fp (text report, end section)
- *   is_text = false → write to stderr (during SBOM generation)
+  Emit licence-gap warnings.
+    is_text = true  → write to fp (text report, end section)
+    is_text = false → write to stderr (during SBOM generation)
  */
 static void emit_license_warnings(const std::vector<LicenseGap>& gaps_,
                                    FILE* fp_, bool is_text_) {
@@ -496,48 +448,35 @@ static void emit_license_warnings(const std::vector<LicenseGap>& gaps_,
 
     if (is_text_) {
         fputs("=======================================================\n"
-              "  WARNINGS — components with unknown license\n"
+              "       WARNINGS — components with unknown license\n"
               "=======================================================\n"
-              "The following components have no detectable license\n"
-              "information.  Add them to the hints file to resolve:\n\n",
-              fp_);
+       
+              "The following components have no detectable license information.  Add them to the hints file to resolve:\n\n", fp_);
         for (const auto& g : gaps_) {
             if (g.is_static) {
-                fprintf(fp_, "  [!] %-28s  (static, %s)%s\n",
-                        g._name.c_str(), g._method.c_str(),
-                        g._version.empty() ? "" : (" v" + g._version).c_str());
+                fprintf(fp_, "  [!] %-28s  (static, %s)%s\n", g._name.c_str(), 
+                                                              g._method.c_str(),
+                                                              g._version.empty() ? "" : (" v" + g._version).c_str());
             } else {
-                fprintf(fp_, "  [!] %-28s  (dynamic)%s\n",
-                        g._name.c_str(),
-                        g._version.empty() ? "" : (" " + g._version).c_str());
+                fprintf(fp_, "  [!] %-28s  (dynamic)%s\n", g._name.c_str(),
+                                                           g._version.empty() ? "" : (" " + g._version).c_str());
             }
         }
         fputc('\n', fp_);
     } else {
         for (const auto& g : gaps_) {
             if (g.is_static) {
-                fprintf(stderr,
-                    "[WARN] static '%s'%s has no license"
-                    " — add to hints file with license field\n",
-                    g._name.c_str(),
-                    g._version.empty() ? "" : (" v" + g._version).c_str());
+                fprintf(stderr,  "[WARN] static '%s'%s has no license  - add to hints file with license field\n", g._name.c_str(),
+                                                                                                                  g._version.empty() ? "" : (" v" + g._version).c_str());
             } else {
-                fprintf(stderr,
-                    "[WARN] '%s'%s has no license information\n",
-                    g._name.c_str(),
-                    g._version.empty() ? "" : (" " + g._version).c_str());
+                fprintf(stderr, "[WARN] '%s'%s has no license information\n", g._name.c_str(),
+                                                                              g._version.empty() ? "" : (" " + g._version).c_str());
             }
         }
     }
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * TEXT output helpers (unchanged from previous version)
- * ════════════════════════════════════════════════════════════════════════════ */
-
-static void print_component(FILE* fp_, const Component& c_,
-                              const char* tag_,
-                              const std::set<std::string>* users_ = nullptr) {
+static void print_component(FILE* fp_, const Component& c_,  const char* tag_, const std::set<std::string>* users_ = nullptr) {
     fprintf(fp_, "%s %s", tag_, c_._name.c_str());
     if (!c_._pkg_version.empty()) {
         fprintf(fp_, "  (%s)", c_._pkg_version.c_str());
@@ -546,19 +485,17 @@ static void print_component(FILE* fp_, const Component& c_,
 
     fprintf(fp_, "    path     : "); fputs(c_._path.c_str(), fp_); fputc('\n', fp_);
     fprintf(fp_, "    arch     : %s\n", c_._arch.c_str());
-    fprintf(fp_, "    type     : %s%s\n",
-            c_._type == ElfType::Executable    ? "executable"     :
-            c_._type == ElfType::SharedLibrary ? "shared-library" : "unknown",
-            c_._is_pie ? " (PIE)" : "");
-    fprintf(fp_, "    stripped : %s   debug : %s\n",
-            c_._stripped ? "yes" : "no", c_._has_debug ? "yes" : "no");
+    fprintf(fp_, "    type     : %s%s\n", c_._type == ElfType::Executable    ? "executable"     :
+                                          c_._type == ElfType::SharedLibrary ? "shared-library" : "unknown",
+                                          c_._is_pie ? " (PIE)" : "");
+            
+    fprintf(fp_, "    stripped : %s   debug : %s\n",  c_._stripped ? "yes" : "no", c_._has_debug ? "yes" : "no");
 
     if (!c_._build_id.empty()) {
         fprintf(fp_, "    build-id : %s\n", c_._build_id.c_str());
     }
     if (!c_._pkg_name.empty()) {
-        fprintf(fp_, "    package  : %s %s\n",
-                c_._pkg_name.c_str(), c_._pkg_version.c_str());
+        fprintf(fp_, "    package  : %s %s\n", c_._pkg_name.c_str(), c_._pkg_version.c_str());
     }
     if (!c_._license.empty()) {
         fprintf(fp_, "    license  : %s\n", c_._license.c_str());
@@ -576,6 +513,7 @@ static void print_component(FILE* fp_, const Component& c_,
         }
         fputc('\n', fp_);
     }
+
     bool any_unres = false;
     for (const auto& d : c_._resolved_deps) {
         if (d[0] == '?') {
@@ -583,6 +521,7 @@ static void print_component(FILE* fp_, const Component& c_,
             break;
         }
     }
+
     if (any_unres) {
         fputs("    MISSING  :", fp_);
         for (const auto& d : c_._resolved_deps) {
@@ -593,6 +532,7 @@ static void print_component(FILE* fp_, const Component& c_,
         }
         fputc('\n', fp_);
     }
+
     if (!c_._static_libs.empty()) {
         fputs("    static   :", fp_);
         for (const auto& sl : c_._static_libs) {
@@ -603,6 +543,7 @@ static void print_component(FILE* fp_, const Component& c_,
                 fputs("  (version unknown) ", fp_);
             }
             fprintf(fp_, "  [%s]", sl._method.c_str());
+          
             if (!sl._license.empty()) {
                 fprintf(fp_, "  %s", sl._license.c_str());
             }
@@ -610,9 +551,9 @@ static void print_component(FILE* fp_, const Component& c_,
         fputc('\n', fp_);
     }
     if (!c_._cu_sources.empty()) {
-        fprintf(fp_, "    dwarf-cu : %zu unit%s",
-                c_._cu_sources.size(), c_._cu_sources.size() > 1 ? "s" : "");
-        if (c_._cu_sources.size() > 3) {
+        fprintf(fp_, "    dwarf-cu : %zu unit%s", c_._cu_sources.size(), c_._cu_sources.size() > 1 ? "s" : "");
+       
+                if (c_._cu_sources.size() > 3) {
             fputs(", first 3 shown", fp_);
         }
         fputc('\n', fp_);
@@ -627,6 +568,7 @@ static void print_component(FILE* fp_, const Component& c_,
             fputc('\n', fp_);
         }
     }
+
     if (users_ && !users_->empty()) {
         fputs("    used-by  :", fp_);
         for (const auto& u : *users_) {
@@ -639,52 +581,41 @@ static void print_component(FILE* fp_, const Component& c_,
     fputc('\n', fp_);
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * Single-file — Text
- * ════════════════════════════════════════════════════════════════════════════ */
-
 static void write_text_single(const DepGraph& g_, FILE* fp_) {
-    fprintf(fp_,
-        "=======================================================\n"
-        "  ELF SBOM (single file)  —  elf-sbom 1.0\n"
-        "=======================================================\n"
-        "Generated  : %s\n"
-        "Root       : %s\n"
-        "Components : %zu\n\n",
-        utc_now().c_str(), g_._root_path.c_str(), g_._components.size());
+    fprintf(fp_, "=======================================================\n"
+                 "  ELF SBOM (single file)  —  elf-sbom 1.0\n"
+                 "=======================================================\n"
+                 "Generated  : %s\n"
+                 "Root       : %s\n"
+                 "Components : %zu\n\n", utc_now().c_str(), g_._root_path.c_str(), g_._components.size());
 
     for (const auto& path : g_._discovery_order) {
         const Component& c = g_._components.at(path);
         print_component(fp_, c, (path == g_._root_path) ? "> [ROOT]" : "  [DEP] ");
     }
+
     /* Warnings for static libs whose version could not be determined */
     auto no_ver = collect_no_version_libs(g_._discovery_order, g_._components);
     emit_version_warnings(no_ver, fp_, true);
-    emit_license_warnings(
-        collect_license_gaps(g_._discovery_order, g_._components), fp_, true);
+    emit_license_warnings( collect_license_gaps(g_._discovery_order, g_._components), fp_, true);
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * Single-file — CycloneDX 1.6 (Cyberwatch-compatible)
- * ════════════════════════════════════════════════════════════════════════════ */
 
 /*
- * Detection method priority (used to keep the most reliable entry).
- * Priority (descending):
- *   hint-file > version-string > dwarf-path > symbol-defined > symbol-ref
- */
-/*
- * Priority scale (higher = more authoritative):
- *   8  hint-file      — explicit user/vendor annotation
- *   7  version-string — literal version found in the binary
- *   6  dwarf-path     — build-system path in DWARF debug info
- *   5  symbol-defined — exported symbol matching library's public API
- *   4  symbol-ref     — referenced symbol (may be weak / plt stub)
- *   3  symbol-cluster — characteristic symbol set (DIE/FLIRT style)
- *   2  pkg-inferred   — version inferred from system package manager
- *                       (unreliable: static libs are often custom builds)
- *   1  byte-sig       — magic byte pattern found in data section
- */
+  Detection method priority (used to keep the most reliable entry).
+  Priority (descending):   hint-file > version-string > dwarf-path > symbol-defined > symbol-ref
+ 
+  Priority scale (higher = more authoritative):
+    8  hint-file      — explicit user/vendor annotation
+    7  version-string — literal version found in the binary
+    6  dwarf-path     — build-system path in DWARF debug info
+    5  symbol-defined — exported symbol matching library's public API
+    4  symbol-ref     — referenced symbol (may be weak / plt stub)
+    3  symbol-cluster — characteristic symbol set (DIE/FLIRT style)
+    2  pkg-inferred   — version inferred from system package manager
+                        (unreliable: static libs are often custom builds)
+    1  byte-sig       — magic byte pattern found in data section
+*/
 static int static_lib_priority(const std::string& method_) {
     if (method_ == "hint-file")       return 8;
     if (method_ == "version-string")  return 7;
@@ -698,34 +629,23 @@ static int static_lib_priority(const std::string& method_) {
 }
 
 /*
- * Collect static lib entries from all components, deduplicated by
- * (name, version) — NOT by name alone.
- *
- * Rationale: the same library may be present in two different versions
- * (e.g. openssl 3.0.5 from the hints file, openssl 3.0.13 from a vendor .so).
- * Each (name, version) pair is a distinct SBOM component with its own PURL
- * and potentially different CVEs.  Only when both name AND version are
- * identical do we merge (keeping the highest-priority detection method).
- *
- * Exception: two "version unknown" entries for the same name are merged
- * into one (we cannot distinguish them).
- */
-static std::vector<StaticLibInfo>
-collect_best_static_libs(const std::vector<std::string>& order,
-                          const std::map<std::string, Component>& comps) {
+  Collect static lib entries from all components, deduplicated by (name, version) — NOT by name alone.
+*/
+static std::vector<StaticLibInfo> collect_best_static_libs(const std::vector<std::string>& order, const std::map<std::string, Component>& comps) {
     /* Key: {name, version} — "" version = "unknown", merged per name */
     using Key = std::pair<std::string, std::string>;
     std::map<Key, StaticLibInfo> best;
 
     for (const auto& path : order) {
         const Component& c = comps.at(path);
+       
         for (const auto& sl : c._static_libs) {
             Key k{sl._name, sl._version};
             auto it = best.find(k);
+          
             if (it == best.end()) {
                 best[k] = sl;
-            } else if (static_lib_priority(sl._method) >
-                       static_lib_priority(it->second._method)) {
+            } else if (static_lib_priority(sl._method) > static_lib_priority(it->second._method)) {
                 it->second = sl;
             }
         }
@@ -740,6 +660,7 @@ collect_best_static_libs(const std::vector<std::string>& order,
             if (!seen.insert(k).second) {
                 continue;
             }
+            
             auto it = best.find(k);
             if (it != best.end()) {
                 result.push_back(it->second);
@@ -774,10 +695,9 @@ static void write_cdx_single(const DepGraph& g_, FILE* fp_) {
         const Component& c      = g_._components.at(path);
         const std::string& ref  = pmap.at(path);
         std::string purl = make_purl(c, os);
+       
         /* CPE from package name (best effort) */
-        std::string cpe  = c._pkg_name.empty()
-                           ? make_cpe(c._name, c._pkg_version)
-                           : make_cpe(c._pkg_name, c._pkg_version);
+        std::string cpe  = c._pkg_name.empty() ? make_cpe(c._name, c._pkg_version) : make_cpe(c._pkg_name, c._pkg_version);
 
         fputs(",\n", fp_);
         write_cdx_component(fp_, c, ref, purl, cpe);
@@ -804,47 +724,46 @@ static void write_cdx_single(const DepGraph& g_, FILE* fp_) {
         const Component& c    = g_._components.at(path);
         const std::string& ref = pmap.at(path);
         fputs(",\n", fp_);
-        fprintf(fp_, "    { \"ref\": \"%s\", \"dependsOn\": [",
-                json_esc(ref).c_str());
+        fprintf(fp_, "    { \"ref\": \"%s\", \"dependsOn\": [",  json_esc(ref).c_str());
+
         bool fd = true;
         std::set<std::string> seen_deps; /* dedup: same path → same PURL */
         for (const auto& dep : c._resolved_deps) {
             if (dep[0] == '?') {
                 continue;
             }
+
             auto it = pmap.find(dep);
             if (it == pmap.end()) {
                 continue;
             }
+
             if (!seen_deps.insert(it->second).second) {
                 continue;
             }
+
             if (!fd) {
                 fputs(", ", fp_);
             }
+
             fprintf(fp_, "\"%s\"", json_esc(it->second).c_str());
             fd = false;
         }
         fputs("] }", fp_);
     }
+
     fputs("\n  ]\n}\n", fp_);
-    emit_version_warnings(
-        collect_no_version_libs(g_._discovery_order, g_._components),
-        stderr, false);
-    emit_license_warnings(
-        collect_license_gaps(g_._discovery_order, g_._components),
-        stderr, false);
+    emit_version_warnings(collect_no_version_libs(g_._discovery_order, g_._components), stderr, false);
+    emit_license_warnings(collect_license_gaps(g_._discovery_order, g_._components), stderr, false);
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * Single-file — SPDX 2.3 Tag-Value
- * ════════════════════════════════════════════════════════════════════════════ */
-
+/* 
+ Single-file — SPDX 2.3 Tag-Value
+*/
 static void write_spdx_single(const DepGraph& g_, FILE* fp_) {
     auto idx = make_idx(g_._discovery_order);
     size_t sl = g_._root_path.rfind('/');
-    std::string docname = (sl != std::string::npos)
-                          ? g_._root_path.substr(sl + 1) : g_._root_path;
+    std::string docname = (sl != std::string::npos)? g_._root_path.substr(sl + 1) : g_._root_path;
 
     fprintf(fp_,
         "SPDXVersion: SPDX-2.3\n"
@@ -853,23 +772,25 @@ static void write_spdx_single(const DepGraph& g_, FILE* fp_) {
         "DocumentName: elf-sbom-%s\n"
         "DocumentNamespace: https://spdx.org/spdxdocs/elf-sbom-%s\n"
         "Creator: Tool: elf-sbom-1.0\n"
-        "Created: %s\n\n",
-        docname.c_str(), new_uuid().c_str(), utc_now().c_str());
+        "Created: %s\n\n", docname.c_str(), new_uuid().c_str(), utc_now().c_str());
 
     OsRelease os = read_os_release();
     /* SPDXRef-DOCUMENT DESCRIBES the root package (recommended §2.7) */
     if (!g_._discovery_order.empty()) {
-        fprintf(fp_, "Relationship: SPDXRef-DOCUMENT DESCRIBES %s\n\n",
-                spdx_ref(g_._root_path, idx).c_str());
+        fprintf(fp_, "Relationship: SPDXRef-DOCUMENT DESCRIBES %s\n\n", spdx_ref(g_._root_path, idx).c_str());
     }
     for (const auto& path : g_._discovery_order) {
         const Component& c = g_._components.at(path);
+
         fprintf(fp_, "PackageName: "); fputs(c._name.c_str(), fp_); fputc('\n', fp_);
         fprintf(fp_, "SPDXID: %s\n", spdx_ref(path, idx).c_str());
+    
         if (!c._pkg_version.empty()) {
             fprintf(fp_, "PackageVersion: %s\n", c._pkg_version.c_str());
         }
+
         fputs("PackageDownloadLocation: NOASSERTION\nFilesAnalyzed: false\n", fp_);
+       
         /* Required SPDX 2.3 fields (§3.7, §3.8, §3.17) */
         if (!c._license.empty()) {
             fprintf(fp_, "PackageLicenseConcluded: %s\n", c._license.c_str());
@@ -878,18 +799,23 @@ static void write_spdx_single(const DepGraph& g_, FILE* fp_) {
             fputs("PackageLicenseConcluded: NOASSERTION\n", fp_);
             fputs("PackageLicenseDeclared: NOASSERTION\n", fp_);
         }
+      
         fputs("PackageCopyrightText: NOASSERTION\n", fp_);
+     
         if (!c._build_id.empty()) {
             fprintf(fp_, "PackageChecksum: SHA1: %s\n", c._build_id.c_str());
         }
+     
         std::string purl = make_purl(c, os);
         if (!purl.empty()) {
             fprintf(fp_, "ExternalRef: PACKAGE-MANAGER purl %s\n", purl.c_str());
         }
+   
         fputs("PackageComment: <text>arch=", fp_);
         fputs(c._arch.c_str(), fp_);
         fputs(" path=", fp_); fputs(c._path.c_str(), fp_);
         fprintf(fp_, " stripped=%s", c._stripped ? "yes" : "no");
+    
         if (!c._static_libs.empty()) {
             fputs(" static_libs=", fp_);
             bool f = true;
@@ -906,6 +832,7 @@ static void write_spdx_single(const DepGraph& g_, FILE* fp_) {
         }
         fputs("</text>\n\n", fp_);
     }
+
     for (const auto& path : g_._discovery_order) {
         const Component& c = g_._components.at(path);
         for (const auto& dep : c._resolved_deps) {
@@ -918,17 +845,10 @@ static void write_spdx_single(const DepGraph& g_, FILE* fp_) {
             }
         }
     }
-    emit_version_warnings(
-        collect_no_version_libs(g_._discovery_order, g_._components),
-        stderr, false);
-    emit_license_warnings(
-        collect_license_gaps(g_._discovery_order, g_._components),
-        stderr, false);
-}
 
-/* ════════════════════════════════════════════════════════════════════════════
- * Directory (multi-root) — Text
- * ════════════════════════════════════════════════════════════════════════════ */
+    emit_version_warnings( collect_no_version_libs(g_._discovery_order, g_._components), stderr, false);
+    emit_license_warnings( collect_license_gaps(g_._discovery_order, g_._components), stderr, false);
+}
 
 static void write_text_multi(const MultiGraph& mg_, FILE* fp_) {
     std::set<std::string> root_set(mg_._roots.begin(), mg_._roots.end());
@@ -941,39 +861,31 @@ static void write_text_multi(const MultiGraph& mg_, FILE* fp_) {
 
     fprintf(fp_,
         "=======================================================\n"
-        "  ELF SBOM (directory scan)  —  elf-sbom 1.0\n"
+        "      ELF SBOM (directory scan)  —  elf-sbom 1.0\n"
         "=======================================================\n"
         "Generated    : %s\n"
         "Scanned dir  : %s\n"
         "Root ELFs    : %zu\n"
         "Dependencies : %zu  (deduplicated)\n"
-        "Total        : %zu\n\n",
-        utc_now().c_str(), mg_._scan_root.c_str(),
-        mg_._roots.size(), n_deps, mg_._components.size());
+        "Total        : %zu\n\n", utc_now().c_str(), mg_._scan_root.c_str(), mg_._roots.size(), n_deps, mg_._components.size());
 
     for (const auto& path : mg_._ordered) {
         const Component& c = mg_._components.at(path);
         bool is_root = root_set.count(path) > 0;
-        const std::set<std::string>* users_ptr =
-            is_root ? nullptr
-                    : (mg_._users.count(path) ? &mg_._users.at(path) : nullptr);
+        const std::set<std::string>* users_ptr = is_root ? nullptr : (mg_._users.count(path) ? &mg_._users.at(path) : nullptr);
         print_component(fp_, c, is_root ? "> [ROOT]" : "  [DEP] ", users_ptr);
     }
+
     auto no_ver = collect_no_version_libs(mg_._ordered, mg_._components);
     emit_version_warnings(no_ver, fp_, true);
-    emit_license_warnings(
-        collect_license_gaps(mg_._ordered, mg_._components), fp_, true);
+    emit_license_warnings(collect_license_gaps(mg_._ordered, mg_._components), fp_, true);
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
- * Directory — CycloneDX 1.6 (Cyberwatch-compatible)
- * ════════════════════════════════════════════════════════════════════════════ */
 
 static void write_cdx_multi(const MultiGraph& mg_, FILE* fp_) {
     OsRelease os = read_os_release();
     std::string arch = sys_arch();
     std::string host = sys_hostname();
-    std::string ts   = utc_now();
+    std::string ts = utc_now();
     std::string uuid = new_uuid();
 
     write_cdx_header(fp_, ts, uuid, host, ts);
@@ -987,18 +899,15 @@ static void write_cdx_multi(const MultiGraph& mg_, FILE* fp_) {
     write_cdx_os_component(fp_, os, arch);
 
     for (const auto& path : mg_._ordered) {
-        const Component& c    = mg_._components.at(path);
+        const Component& c = mg_._components.at(path);
         const std::string& ref = pmap.at(path);
         std::string purl = make_purl(c, os);
-        std::string cpe  = c._pkg_name.empty()
-                           ? make_cpe(c._name, c._pkg_version)
-                           : make_cpe(c._pkg_name, c._pkg_version);
+        std::string cpe  = c._pkg_name.empty() ? make_cpe(c._name, c._pkg_version) : make_cpe(c._pkg_name, c._pkg_version);
         fputs(",\n", fp_);
         write_cdx_component(fp_, c, ref, purl, cpe);
     }
 
-    /* Static lib components — one per canonical name, best version wins.
-     * Entries without a version are recorded in properties only. */
+    /* Static lib components — one per canonical name, best version wins. Entries without a version are recorded in properties only. */
     for (const auto& sl : best_static) {
         std::string sp = make_static_purl(sl);
         if (sp.empty()) {
@@ -1014,22 +923,26 @@ static void write_cdx_multi(const MultiGraph& mg_, FILE* fp_) {
     for (const auto& path : mg_._ordered) {
         const Component& c    = mg_._components.at(path);
         const std::string& ref = pmap.at(path);
+
         fputs(",\n", fp_);
-        fprintf(fp_, "    { \"ref\": \"%s\", \"dependsOn\": [",
-                json_esc(ref).c_str());
+        fprintf(fp_, "    { \"ref\": \"%s\", \"dependsOn\": [", json_esc(ref).c_str());
+
         bool fd = true;
         std::set<std::string> seen_deps; /* dedup: same path → same PURL */
         for (const auto& dep : c._resolved_deps) {
             if (dep[0] == '?') {
                 continue;
             }
+     
             auto it = pmap.find(dep);
             if (it == pmap.end()) {
                 continue;
             }
+     
             if (!seen_deps.insert(it->second).second) {
                 continue;
             }
+     
             if (!fd) {
                 fputs(", ", fp_);
             }
@@ -1038,24 +951,16 @@ static void write_cdx_multi(const MultiGraph& mg_, FILE* fp_) {
         }
         fputs("] }", fp_);
     }
-    fputs("\n  ]\n}\n", fp_);
-    emit_version_warnings(
-        collect_no_version_libs(mg_._ordered, mg_._components),
-        stderr, false);
-    emit_license_warnings(
-        collect_license_gaps(mg_._ordered, mg_._components),
-        stderr, false);
-}
 
-/* ════════════════════════════════════════════════════════════════════════════
- * Directory — SPDX 2.3 Tag-Value
- * ════════════════════════════════════════════════════════════════════════════ */
+    fputs("\n  ]\n}\n", fp_);
+    emit_version_warnings( collect_no_version_libs(mg_._ordered, mg_._components), stderr, false);
+    emit_license_warnings( collect_license_gaps(mg_._ordered, mg_._components), stderr, false);
+}
 
 static void write_spdx_multi(const MultiGraph& mg_, FILE* fp_) {
     auto idx = make_idx(mg_._ordered);
     size_t sl = mg_._scan_root.rfind('/');
-    std::string docname = (sl != std::string::npos)
-                          ? mg_._scan_root.substr(sl + 1) : mg_._scan_root;
+    std::string docname = (sl != std::string::npos)? mg_._scan_root.substr(sl + 1) : mg_._scan_root;
 
     fprintf(fp_,
         "SPDXVersion: SPDX-2.3\n"
@@ -1064,24 +969,24 @@ static void write_spdx_multi(const MultiGraph& mg_, FILE* fp_) {
         "DocumentName: elf-sbom-%s\n"
         "DocumentNamespace: https://spdx.org/spdxdocs/elf-sbom-%s\n"
         "Creator: Tool: elf-sbom-1.0\n"
-        "Created: %s\n\n",
-        docname.c_str(), new_uuid().c_str(), utc_now().c_str());
+        "Created: %s\n\n", docname.c_str(), new_uuid().c_str(), utc_now().c_str());
 
     OsRelease os = read_os_release();
     /* SPDXRef-DOCUMENT DESCRIBES all root packages */
     for (const auto& root : mg_._roots) {
-        fprintf(fp_, "Relationship: SPDXRef-DOCUMENT DESCRIBES %s\n",
-                spdx_ref(root, idx).c_str());
+        fprintf(fp_, "Relationship: SPDXRef-DOCUMENT DESCRIBES %s\n", spdx_ref(root, idx).c_str());
     }
     fputc('\n', fp_);
     for (const auto& path : mg_._ordered) {
         const Component& c = mg_._components.at(path);
         fprintf(fp_, "PackageName: "); fputs(c._name.c_str(), fp_); fputc('\n', fp_);
         fprintf(fp_, "SPDXID: %s\n", spdx_ref(path, idx).c_str());
+       
         if (!c._pkg_version.empty()) {
             fprintf(fp_, "PackageVersion: %s\n", c._pkg_version.c_str());
         }
         fputs("PackageDownloadLocation: NOASSERTION\nFilesAnalyzed: false\n", fp_);
+
         /* Required SPDX 2.3 fields (§3.7, §3.8, §3.17) */
         if (!c._license.empty()) {
             fprintf(fp_, "PackageLicenseConcluded: %s\n", c._license.c_str());
@@ -1090,18 +995,23 @@ static void write_spdx_multi(const MultiGraph& mg_, FILE* fp_) {
             fputs("PackageLicenseConcluded: NOASSERTION\n", fp_);
             fputs("PackageLicenseDeclared: NOASSERTION\n", fp_);
         }
+
         fputs("PackageCopyrightText: NOASSERTION\n", fp_);
+
         if (!c._build_id.empty()) {
             fprintf(fp_, "PackageChecksum: SHA1: %s\n", c._build_id.c_str());
         }
+
         std::string purl = make_purl(c, os);
         if (!purl.empty()) {
             fprintf(fp_, "ExternalRef: PACKAGE-MANAGER purl %s\n", purl.c_str());
         }
+
         fputs("PackageComment: <text>arch=", fp_);
         fputs(c._arch.c_str(), fp_);
         fputs(" path=", fp_); fputs(c._path.c_str(), fp_);
         fprintf(fp_, " stripped=%s", c._stripped ? "yes" : "no");
+
         if (!c._static_libs.empty()) {
             fputs(" static_libs=", fp_);
             bool f = true;
@@ -1118,29 +1028,20 @@ static void write_spdx_multi(const MultiGraph& mg_, FILE* fp_) {
         }
         fputs("</text>\n\n", fp_);
     }
+
     for (const auto& path : mg_._ordered) {
         const Component& c = mg_._components.at(path);
         for (const auto& dep : c._resolved_deps) {
             if (dep[0] == '?') {
-                fprintf(fp_, "Relationship: %s DYNAMIC_LINK SPDXRef-NOASSERTION\n",
-                        spdx_ref(path, idx).c_str());
+                fprintf(fp_, "Relationship: %s DYNAMIC_LINK SPDXRef-NOASSERTION\n", spdx_ref(path, idx).c_str());
             } else {
-                fprintf(fp_, "Relationship: %s DYNAMIC_LINK %s\n",
-                        spdx_ref(path, idx).c_str(), spdx_ref(dep, idx).c_str());
+                fprintf(fp_, "Relationship: %s DYNAMIC_LINK %s\n", spdx_ref(path, idx).c_str(), spdx_ref(dep, idx).c_str());
             }
         }
     }
-    emit_version_warnings(
-        collect_no_version_libs(mg_._ordered, mg_._components),
-        stderr, false);
-    emit_license_warnings(
-        collect_license_gaps(mg_._ordered, mg_._components),
-        stderr, false);
+    emit_version_warnings(collect_no_version_libs(mg_._ordered, mg_._components), stderr, false);
+    emit_license_warnings(collect_license_gaps(mg_._ordered, mg_._components), stderr, false);
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
- * Public dispatch
- * ════════════════════════════════════════════════════════════════════════════ */
 
 static FILE* open_output(const std::string& output_) {
     if (!output_.empty() && output_ != "-") {
@@ -1158,11 +1059,13 @@ void write_sbom(const DepGraph& g_, SbomFormat fmt_, const std::string& output_)
     if (!fp) {
         return;
     }
+
     switch (fmt_) {
         case SbomFormat::Text:           write_text_single(g_, fp); break;
         case SbomFormat::CycloneDX_JSON: write_cdx_single(g_,  fp); break;
         case SbomFormat::SPDX_TagValue:  write_spdx_single(g_, fp); break;
     }
+
     if (fp != stdout) {
         fclose(fp);
     }
@@ -1174,11 +1077,13 @@ void write_sbom_multi(const MultiGraph& mg_, SbomFormat fmt_,
     if (!fp) {
         return;
     }
+
     switch (fmt_) {
         case SbomFormat::Text:           write_text_multi(mg_, fp); break;
         case SbomFormat::CycloneDX_JSON: write_cdx_multi(mg_,  fp); break;
         case SbomFormat::SPDX_TagValue:  write_spdx_multi(mg_, fp); break;
     }
+
     if (fp != stdout) {
         fclose(fp);
     }

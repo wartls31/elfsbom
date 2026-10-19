@@ -5,10 +5,8 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 
-/* ── /etc/os-release parser ─────────────────────────────────────────────── */
 /*
- * Handles both quoted ("Ubuntu 22.04") and unquoted (ubuntu) values,
- * and ignores comments and blank lines.
+  Handles both quoted ("Ubuntu 22.04") and unquoted (ubuntu) values and ignores comments and blank lines.
  */
 OsRelease read_os_release() {
     OsRelease info;
@@ -17,12 +15,14 @@ OsRelease read_os_release() {
     if (!f) {
         f = fopen("/usr/lib/os-release", "r"); /* fallback */
     }
+
     if (!f) {
         return info;
     }
 
-    char line[512];
+    char line[512] = {0};
     while (fgets(line, sizeof(line), f)) {
+
         /* Strip trailing newline */
         char* nl = strpbrk(line, "\r\n");
         if (nl) {
@@ -66,10 +66,8 @@ OsRelease read_os_release() {
     return info;
 }
 
-/* ── Package family classification ──────────────────────────────────────── */
 
 PkgFamily pkg_family(const OsRelease& os_) {
-    /* Check both id and id_like for family membership */
     const std::string combined = os_._id + " " + os_._id_like;
 
     auto has = [&](const char* s) {
@@ -103,8 +101,6 @@ PkgFamily pkg_family(const OsRelease& os_) {
     return PkgFamily::Unknown;
 }
 
-/* ── System architecture ─────────────────────────────────────────────────── */
-
 std::string sys_arch() {
     struct utsname u;
     if (uname(&u) == 0) {
@@ -112,8 +108,6 @@ std::string sys_arch() {
     }
     return "unknown";
 }
-
-/* ── Hostname ────────────────────────────────────────────────────────────── */
 
 std::string sys_hostname() {
     char buf[256];

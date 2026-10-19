@@ -10,17 +10,16 @@
 #include <gelf.h>
 #include <libelf.h>
 
-/* ── Version token extraction ────────────────────────────────────────────── */
 /*
- * From a string like "3.0.5 5 Jul 2022" or "1.2.11 Copyright…"
- * extract just the leading version number: "3.0.5", "1.2.11".
- *
- * Rules:
- *  - Skip leading spaces.
- *  - First character must be a digit.
- *  - Accept digits, dots, and trailing alpha (e.g. "1.2.3a").
- *  - Result must contain at least one dot.
- *  - Strip trailing dots.
+  From a string like "3.0.5 5 Jul 2022" or "1.2.11 Copyright…"
+  extract just the leading version number: "3.0.5", "1.2.11".
+ 
+  Rules:
+   - Skip leading spaces.
+   - First character must be a digit.
+   - Accept digits, dots, and trailing alpha (e.g. "1.2.3a").
+   - Result must contain at least one dot.
+   - Strip trailing dots.
  */
 static std::string extract_version(const char* s_) {
     while (*s_ == ' ' || *s_ == '\t') {
@@ -35,11 +34,8 @@ static std::string extract_version(const char* s_) {
         if (isdigit((unsigned char)*s_)) {
             s_++;
         } else if (*s_ == '.' && s_ > start && isdigit((unsigned char)*(s_+1))) {
-            /* Accept dot only when followed by a digit */
             s_++;
         } else if (isalpha((unsigned char)*s_) && s_ > start) {
-            /* Allow a short alphabetic suffix (e.g. "1.2.3a", "1.1.1q")
-             * but reject long words like "background", "release", "beta". */
             size_t alpha_len = 0;
             const char* tmp = s_;
             while (isalpha((unsigned char)*tmp)) {
@@ -47,9 +43,9 @@ static std::string extract_version(const char* s_) {
                 tmp++;
             }
             if (alpha_len <= 2) {
-                s_ = tmp;  /* "a", "q", "rc" are OK */
+                s_ = tmp; 
             } else {
-                break;     /* "beta", "background" → stop */
+                break;    
             }
         } else {
             break;
@@ -57,7 +53,7 @@ static std::string extract_version(const char* s_) {
     }
 
     std::string v(start, s_);
-    /* Require at least one dot flanked by digits on both sides */
+
     bool valid = false;
     for (size_t i = 1; i + 1 < v.size(); i++) {
         if (v[i] == '.' && isdigit((unsigned char)v[i-1])
@@ -76,13 +72,14 @@ static std::string extract_version(const char* s_) {
     return v;
 }
 
-/* ── Prefix-based pattern table ─────────────────────────────────────────── */
 /*
- * Each entry maps a string literal that a library embeds in its .rodata to
- * the canonical library name.  The version number follows immediately after
- * the prefix (possibly after a leading space, handled by extract_version).
+  Each entry maps a string literal that a library embeds in its .rodata tothe canonical library name.  
+  The version number follows immediately afterthe prefix (possibly after a leading space, handled by extract_version).
  */
-struct PrefixPat { const char* pfx; const char* lib; };
+struct PrefixPat { 
+    const char* pfx; 
+    const char* lib; 
+};
 
 static const PrefixPat PREFIX_PATS[] = {
     /* TLS / crypto */
@@ -155,17 +152,14 @@ static const PrefixPat PREFIX_PATS[] = {
     {nullptr, nullptr}
 };
 
-/* ── Compound "word/X.Y.Z" parser ────────────────────────────────────────── */
 /*
- * Parse strings such as:
- *   "libcurl/7.85.0 OpenSSL/3.0.5 zlib/1.2.11 nghttp2/1.51.0 brotli/1.0.9"
- *
- * For every occurrence of a '/' preceded by an all-ASCII word and followed
- * by a version number, we record the (word, version) pair.
- * Only names with at least 2 characters are kept to filter noise.
+  Parse strings such as:
+    "libcurl/7.85.0 OpenSSL/3.0.5 zlib/1.2.11 nghttp2/1.51.0 brotli/1.0.9"
+ 
+  For every occurrence of a '/' preceded by an all-ASCII word and followed by a version number, we record the (word, version) pair.
+  Only names with at least 2 characters are kept to filter noise.
  */
-static void parse_compound(const char* str_, size_t len_,
-                             std::map<std::string, std::string>& out_) {
+static void parse_compound(const char* str_, size_t len_, std::map<std::string, std::string>& out_) {
     const char* end = str_ + len_;
     const char* p   = str_;
 
@@ -177,22 +171,15 @@ static void parse_compound(const char* str_, size_t len_,
 
         /* Walk backwards to find the start of the word before '/' */
         const char* w = slash;
-        while (w > str_ &&
-               (isalnum((unsigned char)*(w - 1)) ||
-                *(w - 1) == '-' || *(w - 1) == '_')) {
+        while ((w > str_) && (isalnum((unsigned char)*(w - 1)) || (*(w - 1) == '-') || (*(w - 1) == '_'))) {
             w--;
         }
 
-        if (w < slash && isalpha((unsigned char)*w)) {
+        if ((w < slash) && isalpha((unsigned char)*w)) {
             std::string name(w, slash);
             std::string ver = extract_version(slash + 1);
 
-            if (!ver.empty() && name.size() >= 3) {
-                /*
-                 * Reject all-uppercase tokens: they are protocol identifiers
-                 * (HTTP, RTSP, FTP, TLS, …), not library names.
-                 * Library names always contain at least one lowercase letter.
-                 */
+            if ((!ver.empty()) && (name.size() >= 3)) {
                 bool all_upper = true;
                 for (char ch : name) {
                     if (islower((unsigned char)ch)) {
@@ -210,20 +197,18 @@ static void parse_compound(const char* str_, size_t len_,
     }
 }
 
-/* ── DWARF build-path parser ─────────────────────────────────────────────── */
 /*
- * Parse CU source paths like:
- *   "/build/openssl-3.0.5/ssl/ssl_lib.c"   → {openssl, 3.0.5, dwarf-path}
- *   "/tmp/curl-7.85.0/lib/url.c"            → {curl, 7.85.0,   dwarf-path}
- *   "/usr/src/zlib-1.2.11/deflate.c"        → {zlib, 1.2.11,   dwarf-path}
- *
- * The pattern is: a path component of the form "NAME-X.Y.Z" where NAME is
- * alphabetic and X.Y.Z looks like a version number.
+  Parse CU source paths like:
+    "/build/openssl-3.0.5/ssl/ssl_lib.c"   → {openssl, 3.0.5, dwarf-path}
+    "/tmp/curl-7.85.0/lib/url.c"            → {curl, 7.85.0,   dwarf-path}
+    "/usr/src/zlib-1.2.11/deflate.c"        → {zlib, 1.2.11,   dwarf-path}
+ 
+  The pattern is: a path component of the form "NAME-X.Y.Z" where NAME i alphabetic and X.Y.Z looks like a version number.
  */
-static void extract_dwarf_versions(const std::vector<std::string>& cu_sources_,
-                                    std::map<std::string, std::string>& out_) {
+static void extract_dwarf_versions(const std::vector<std::string>& cu_sources_, std::map<std::string, std::string>& out_) {
     for (const auto& src : cu_sources_) {
         const char* p = src.c_str();
+       
         while (*p) {
             /* Look for '-' followed by a digit (version separator) */
             if (*p == '-' && p > src.c_str() && isdigit((unsigned char)*(p + 1))) {
@@ -235,6 +220,7 @@ static void extract_dwarf_versions(const std::vector<std::string>& cu_sources_,
                         *name_start == '_')) {
                     name_start--;
                 }
+              
                 /* name_start might point before an alphanumeric, advance */
                 if (!isalpha((unsigned char)*name_start)) {
                     name_start++;
@@ -254,19 +240,9 @@ static void extract_dwarf_versions(const std::vector<std::string>& cu_sources_,
     }
 }
 
-/* ── Merge helper ────────────────────────────────────────────────────────── */
-/*
- * Insert or upgrade an entry in the result vector.
- * An entry with a version is always preferred over one without.
- * Among entries with versions, the first insertion wins.
- */
-static void merge_result(std::vector<StaticLibInfo>& found_,
-                          const std::string& name_,
-                          const std::string& version_,
-                          const std::string& method_) {
+static void merge_result(std::vector<StaticLibInfo>& found_, const std::string& name_, const std::string& version_, const std::string& method_) {
     for (auto& e : found_) {
         if (e._name == name_) {
-            /* Upgrade: replace method/version if we now have a version */
             if (e._version.empty() && !version_.empty()) {
                 e._version = version_;
                 e._method  = method_;
@@ -277,10 +253,7 @@ static void merge_result(std::vector<StaticLibInfo>& found_,
     found_.push_back({name_, version_, method_, ""});
 }
 
-/* ── ELF .rodata section scanner ─────────────────────────────────────────── */
-
-static void scan_elf_sections(const std::string& path_,
-                               std::map<std::string, std::string>& detected_) {
+static void scan_elf_sections(const std::string& path_, std::map<std::string, std::string>& detected_) {
     if (elf_version(EV_CURRENT) == EV_NONE) {
         return;
     }
@@ -323,25 +296,23 @@ static void scan_elf_sections(const std::string& path_,
         }
 
         /*
-         * Target sections:
-         *   .rodata          — main string constant pool
-         *   .rodata.str*     — GCC merged string subsections
-         *   .data.rel.ro     — const data requiring relocation
+          Target sections:
+            .rodata          — main string constant pool
+            .rodata.str*     — GCC merged string subsections
+            .data.rel.ro     — const data requiring relocation
          */
-        bool scan_this =
-            strncmp(sname, ".rodata",      7) == 0 ||
-            strcmp (sname, ".data.rel.ro") == 0;
+        bool scan_this = (strncmp(sname, ".rodata",7) == 0) || (strcmp (sname, ".data.rel.ro") == 0);
         if (!scan_this) {
             continue;
         }
 
         Elf_Data* data = elf_getdata(scn, nullptr);
-        if (!data || !data->d_buf || data->d_size == 0) {
+        if ((!data )|| (!data->d_buf) || (data->d_size == 0)) {
             continue;
         }
 
         const char* buf  = (const char*)data->d_buf;
-        size_t       size = data->d_size;
+        size_t size = data->d_size;
 
         /* Walk the section byte by byte, extracting printable strings. */
         size_t i = 0;
@@ -354,8 +325,7 @@ static void scan_elf_sections(const std::string& path_,
 
             /* Find end of this printable run */
             size_t start = i;
-            while (i < size && buf[i] != '\0' &&
-                   (isprint((unsigned char)buf[i]) || buf[i] == '\t')) {
+            while ((i < size) && (buf[i] != '\0') && (isprint((unsigned char)buf[i]) || (buf[i] == '\t'))) {
                 i++;
             }
 
@@ -371,12 +341,13 @@ static void scan_elf_sections(const std::string& path_,
             /* 1 — Prefix-based matching */
             for (const PrefixPat* pp = PREFIX_PATS; pp->pfx; pp++) {
                 size_t plen = strlen(pp->pfx);
-                if (slen >= plen && memcmp(s, pp->pfx, plen) == 0) {
+                
+                if ((slen >= plen) && (memcmp(s, pp->pfx, plen) == 0)) {
                     std::string ver = extract_version(s + plen);
+                    
                     if (!ver.empty()) {
                         auto it = detected_.find(pp->lib);
-                        /* Keep first hit, or upgrade empty → versioned */
-                        if (it == detected_.end() || it->second.empty()) {
+                        if ((it == detected_.end()) || (it->second.empty())) {
                             detected_[pp->lib] = ver;
                         }
                     }
@@ -384,11 +355,11 @@ static void scan_elf_sections(const std::string& path_,
             }
 
             /* 2 — Compound "word/X.Y.Z" scan (min length heuristic) */
-            if (slen >= 12 && memchr(s, '/', slen)) {
+            if ((slen >= 12) && memchr(s, '/', slen)) {
                 parse_compound(s, slen, detected_);
             }
 
-            if (i < size && buf[i] == '\0') {
+            if ((i < size) && (buf[i] == '\0')) {
                 i++;
             }
         }
@@ -398,12 +369,9 @@ static void scan_elf_sections(const std::string& path_,
     close(fd);
 }
 
-/* ── Public interface ────────────────────────────────────────────────────── */
 
-void scan_version_strings(const std::string& path_,
-                           const std::vector<std::string>& cu_sources_,
-                           std::vector<StaticLibInfo>& found_) {
-    /* -- Strategy 1 & 2: .rodata scanning --------------------------------- */
+void scan_version_strings(const std::string& path_, const std::vector<std::string>& cu_sources_, std::vector<StaticLibInfo>& found_) {
+    /* Strategy 1 & 2: .rodata scanning  */
     std::map<std::string, std::string> from_rodata;
     scan_elf_sections(path_, from_rodata);
 
@@ -411,7 +379,7 @@ void scan_version_strings(const std::string& path_,
         merge_result(found_, lib, ver, "version-string");
     }
 
-    /* -- Strategy 3: DWARF build-path parsing ----------------------------- */
+    /*  Strategy 3: DWARF build-path parsing  */
     std::map<std::string, std::string> from_dwarf;
     extract_dwarf_versions(cu_sources_, from_dwarf);
 

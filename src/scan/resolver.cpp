@@ -10,8 +10,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-/* ── Utilities ──────────────────────────────────────────────────────────── */
-
 static bool is_regular_file(const std::string& p_) {
     struct stat st;
     return stat(p_.c_str(), &st) == 0 && S_ISREG(st.st_mode);
@@ -61,9 +59,11 @@ static void rtrim(char* s_) {
     }
 }
 
-/* ── Constructor ────────────────────────────────────────────────────────── */
-
-Resolver::Resolver(const std::string& origin_dir) : origin_dir_(origin_dir) {
+Resolver::Resolver(const std::string& origin_dir) : 
+        _include_system_libs(true),
+        _skip_objects(false), // skip ET_REL relocatable files
+        _max_depth(64),
+        _origin_dir(origin_dir) {
     if (const char* ldp = getenv("LD_LIBRARY_PATH")) {
         ld_env_paths_ = split_colon(ldp);
     }
@@ -71,17 +71,23 @@ Resolver::Resolver(const std::string& origin_dir) : origin_dir_(origin_dir) {
     load_ld_conf("/etc/ld.so.conf");
 
     default_paths_ = {
-        "/lib",           "/lib64",
-        "/usr/lib",       "/usr/lib64",
-        "/usr/local/lib", "/usr/local/lib64",
-        "/lib/x86_64-linux-gnu",    "/usr/lib/x86_64-linux-gnu",
-        "/lib/aarch64-linux-gnu",   "/usr/lib/aarch64-linux-gnu",
-        "/lib/arm-linux-gnueabihf", "/usr/lib/arm-linux-gnueabihf",
-        "/lib/i386-linux-gnu",      "/usr/lib/i386-linux-gnu",
+        "/lib",           
+        "/lib64",
+        "/usr/lib",       
+        "/usr/lib64",
+        "/usr/local/lib", 
+        "/usr/local/lib64",
+        "/lib/x86_64-linux-gnu",    
+        "/usr/lib/x86_64-linux-gnu",
+        "/lib/aarch64-linux-gnu",   
+        "/usr/lib/aarch64-linux-gnu",
+        "/lib/arm-linux-gnueabihf", 
+        "/usr/lib/arm-linux-gnueabihf",
+        "/lib/i386-linux-gnu",      
+        "/usr/lib/i386-linux-gnu",
     };
 }
 
-/* ── /etc/ld.so.conf parser ─────────────────────────────────────────────── */
 
 void Resolver::load_ld_conf(const std::string& file_) {
     FILE* f = fopen(file_.c_str(), "r");
@@ -89,7 +95,7 @@ void Resolver::load_ld_conf(const std::string& file_) {
         return;
     }
 
-    char line[PATH_MAX];
+    char line[PATH_MAX] = {0};
     while (fgets(line, sizeof(line), f)) {
         rtrim(line);
         if (line[0] == '\0' || line[0] == '#') {
@@ -109,6 +115,7 @@ void Resolver::load_ld_conf(const std::string& file_) {
             if (!dp) {
                 continue;
             }
+
             struct dirent* de;
             while ((de = readdir(dp)) != nullptr) {
                 if (de->d_name[0] == '.') {
@@ -126,30 +133,26 @@ void Resolver::load_ld_conf(const std::string& file_) {
     fclose(f);
 }
 
-/* ── $ORIGIN expansion ──────────────────────────────────────────────────── */
 
-std::string Resolver::expand_origin(const std::string& entry_,
-                                     const std::string& origin_) const {
+std::string Resolver::expand_origin(const std::string& entry_, const std::string& origin_) const {
     const std::string tok = "$ORIGIN";
     std::string r = entry_;
-    size_t pos;
+    size_t pos = 0;
+
     while ((pos = r.find(tok)) != std::string::npos) {
         r.replace(pos, tok.size(), origin_);
     }
     return r;
 }
 
-/* ── Library lookup ─────────────────────────────────────────────────────── */
 
-std::string Resolver::find_library(const std::string& libname_,
-                                    const std::vector<std::string>& rpath_,
-                                    const std::vector<std::string>& runpath_) const {
+std::string Resolver::find_library(const std::string& libname_, const std::vector<std::string>& rpath_, const std::vector<std::string>& runpath_) const {
     std::vector<std::string> search;
     search.reserve(64);
 
     if (runpath_.empty()) {
         for (const auto& p : rpath_) {
-            search.push_back(expand_origin(p, origin_dir_));
+            search.push_back(expand_origin(p, _origin_dir));
         }
     }
 
@@ -157,7 +160,7 @@ std::string Resolver::find_library(const std::string& libname_,
         search.push_back(p);
     }
     for (const auto& p : runpath_) {
-        search.push_back(expand_origin(p, origin_dir_));
+        search.push_back(expand_origin(p, _origin_dir));
     }
     for (const auto& p : conf_paths_) {
         search.push_back(p);
@@ -175,12 +178,8 @@ std::string Resolver::find_library(const std::string& libname_,
     return {};
 }
 
-/* ── Recursive graph builder ────────────────────────────────────────────── */
 
-void Resolver::recurse(const std::string& path_,
-                        DepGraph& graph_,
-                        std::set<std::string>& visited_,
-                        int depth_) {
+void Resolver::recurse(const std::string& path_, DepGraph& graph_, std::set<std::string>& visited_, int32_t depth_) {
     if (depth_ > _max_depth) {
         return;
     }

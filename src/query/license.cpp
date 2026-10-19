@@ -10,43 +10,38 @@
 #include <gelf.h>
 #include <libelf.h>
 
-/* ── Utilities ──────────────────────────────────────────────────────────── */
 
 static std::string run_cmd(const char* cmd_) {
     FILE* p = popen(cmd_, "r");
     if (!p) {
         return {};
     }
+
     std::string out;
-    char buf[512];
+    char buf[512] = {0};
     while (fgets(buf, sizeof(buf), p)) {
         out += buf;
     }
+
     pclose(p);
-    while (!out.empty() && (unsigned char)out.back() <= ' ') {
+    while ((!out.empty()) && ((unsigned char)out.back() <= ' ')) {
         out.pop_back();
     }
     return out;
 }
 
 static const char* ltrim(const char* s_) {
-    while (*s_ == ' ' || *s_ == '\t') {
+    while ((*s_ == ' ') || (*s_ == '\t')) {
         s_++;
     }
     return s_;
 }
 
 static void rtrim(std::string& s_) {
-    while (!s_.empty() && (unsigned char)s_.back() <= ' ') {
+    while ((!s_.empty()) && ((unsigned char)s_.back() <= ' ')) {
         s_.pop_back();
     }
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
- * Known-library → SPDX expression table
- *
- * SPDX license identifiers: https://spdx.org/licenses/
- * ════════════════════════════════════════════════════════════════════════════ */
 
 struct LicEntry {
     const char* _name;
@@ -131,18 +126,13 @@ std::string known_lib_spdx(const std::string& name_, const std::string& version_
     return {};
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * Source 1 — Package manager queries
- * ════════════════════════════════════════════════════════════════════════════ */
-
 /*
- * DEB: parse /usr/share/doc/<pkg>/copyright.
- * Looks for:
- *   "SPDX-License-Identifier: <expr>"  (REUSE-style, highest priority)
- *   "License: <expr>"                   (DEP-5 machine-readable format)
- *
- * Only scans the first 8 KB to keep it fast; the license header is always
- * near the top of the copyright file.
+  DEB: parse /usr/share/doc/<pkg>/copyright.
+  Looks for:
+    "SPDX-License-Identifier: <expr>"  (REUSE-style, highest priority)
+    "License: <expr>"                   (DEP-5 machine-readable format)
+ 
+  Only scans the first 8 KB to keep it fast; the license header is always  near the top of the copyright file.
  */
 static std::string deb_copyright_license(const std::string& pkg_name_) {
     std::string path = "/usr/share/doc/" + pkg_name_ + "/copyright";
@@ -151,12 +141,12 @@ static std::string deb_copyright_license(const std::string& pkg_name_) {
         return {};
     }
 
-    char line[512];
+    char line[512] = {0};
     std::string result;
     size_t bytes_read = 0;
     const size_t MAX_BYTES = 8192;
 
-    while (bytes_read < MAX_BYTES && fgets(line, sizeof(line), f)) {
+    while ((bytes_read < MAX_BYTES) && (fgets(line, sizeof(line), f))) {
         bytes_read += strlen(line);
 
         /* REUSE-style: SPDX-License-Identifier anywhere on the line */
@@ -173,14 +163,7 @@ static std::string deb_copyright_license(const std::string& pkg_name_) {
             const char* val = ltrim(line + 8);
             result = val;
             rtrim(result);
-            /* DEP-5 license field may have the expression on the first "word"
-             * followed by verbose text.  Keep only the first token-cluster
-             * (no embedded spaces in a proper SPDX expression, except for
-             * " OR ", " AND " — so stop at the first bare space after
-             * a version-like pattern). */
-            /* Actually SPDX expressions CAN contain spaces, e.g.
-             * "GPL-2.0-only WITH Classpath-exception-2.0"
-             * Just take the whole trimmed value. */
+
             break;
         }
     }
@@ -191,8 +174,7 @@ static std::string deb_copyright_license(const std::string& pkg_name_) {
 static std::string rpm_license(const std::string& pkg_name_) {
     char cmd[512];
     snprintf(cmd, sizeof(cmd),
-        "rpm -q --queryformat '%%{LICENSE}' '%s' 2>/dev/null",
-        pkg_name_.c_str());
+        "rpm -q --queryformat '%%{LICENSE}' '%s' 2>/dev/null", pkg_name_.c_str());
     return run_cmd(cmd);
 }
 
@@ -201,18 +183,9 @@ static std::string apk_license(const std::string& pkg_name_) {
     char cmd[512];
     snprintf(cmd, sizeof(cmd),
         "apk info '%s' 2>/dev/null | grep -i '^license' | head -1"
-        " | sed 's/^[Ll]icense:[[:space:]]*//'",
-        pkg_name_.c_str());
+        " | sed 's/^[Ll]icense:[[:space:]]*//'", pkg_name_.c_str());
     return run_cmd(cmd);
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
- * Source 3 — Binary string scan (.rodata / .data.rel.ro)
- *
- * Some projects compiled with REUSE-compliant tooling embed
- * "SPDX-License-Identifier: <expr>" strings in their read-only data.
- * We scan up to MAX_SCAN_BYTES of each matching section.
- * ════════════════════════════════════════════════════════════════════════════ */
 
 static const size_t MAX_SCAN_BYTES = 65536; /* 64 KB per section */
 
@@ -259,35 +232,32 @@ static std::string scan_binary_spdx(const std::string& path_) {
         if (!sname) {
             continue;
         }
-        if (strncmp(sname, ".rodata", 7) != 0 &&
-            strcmp(sname,  ".data.rel.ro") != 0) {
+        if ((strncmp(sname, ".rodata", 7) != 0) && (strcmp(sname,  ".data.rel.ro") != 0)) {
             continue;
         }
 
         Elf_Data* data = elf_getdata(scn, nullptr);
-        if (!data || !data->d_buf) {
+        if ((!data) || (!data->d_buf)) {
             continue;
         }
 
         const char* buf  = (const char*)data->d_buf;
-        size_t       size = data->d_size < MAX_SCAN_BYTES
-                            ? data->d_size : MAX_SCAN_BYTES;
+        size_t size = data->d_size < MAX_SCAN_BYTES ? data->d_size : MAX_SCAN_BYTES;
 
-        /* Simple Boyer-Moore-Horspool-like scan */
         for (size_t i = 0; i + TLEN < size; i++) {
             if (memcmp(buf + i, TARGET, TLEN) != 0) {
                 continue;
             }
 
             const char* val = buf + i + TLEN;
-            while (*val == ' ' || *val == '\t') {
+            while ((*val == ' ') || (*val == '\t')) {
                 val++;
             }
 
             /* Extract until end-of-string / non-printable */
             std::string expr;
-            while (*val && (isprint((unsigned char)*val) || *val == ' ')
-                   && expr.size() < 128) {
+
+            while ((*val) && ((isprint((unsigned char)*val)) || (*val == ' '))  && (expr.size() < 128)) {
                 expr += *val++;
             }
 
@@ -304,13 +274,8 @@ static std::string scan_binary_spdx(const std::string& path_) {
     return result;
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * Public interface
- * ════════════════════════════════════════════════════════════════════════════ */
-
 void detect_license(Component& comp_, const OsRelease& os_) {
-    /* ── Dynamic component license ───────────────────────────────────────── */
-    if (comp_._license.empty() && !comp_._pkg_name.empty()) {
+    if ((comp_._license.empty()) && (!comp_._pkg_name.empty())) {
         PkgFamily fam = pkg_family(os_);
         switch (fam) {
             case PkgFamily::Deb:
@@ -343,7 +308,6 @@ void detect_license(Component& comp_, const OsRelease& os_) {
         comp_._license = scan_binary_spdx(comp_._path);
     }
 
-    /* ── Static lib licenses ─────────────────────────────────────────────── */
     for (auto& sl : comp_._static_libs) {
         if (!sl._license.empty()) {
             continue;

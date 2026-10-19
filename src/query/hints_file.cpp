@@ -4,30 +4,26 @@
 #include <cstdio>
 #include <cstring>
 
-/* ── Helpers ─────────────────────────────────────────────────────────────── */
-
 static void rtrim(char* s_) {
     size_t n = strlen(s_);
-    while (n > 0 && (unsigned char)s_[n-1] <= ' ') {
+    while ((n > 0) && ((unsigned char)s_[n-1] <= ' ')) {
         n--;
         s_[n] = '\0';
     }
 }
 
 static void rtrim_str(std::string& s_) {
-    while (!s_.empty() && (unsigned char)s_.back() <= ' ') {
+    while ((!s_.empty()) && ((unsigned char)s_.back() <= ' ')) {
         s_.pop_back();
     }
 }
 
 static const char* ltrim(const char* s_) {
-    while (*s_ == ' ' || *s_ == '\t') {
+    while ((*s_ == ' ') || (*s_ == '\t')) {
         s_++;
     }
     return s_;
 }
-
-/* ── Parser ──────────────────────────────────────────────────────────────── */
 
 HintsFile load_hints_file(const std::string& path_) {
     HintsFile result;
@@ -38,7 +34,7 @@ HintsFile load_hints_file(const std::string& path_) {
         return result;
     }
 
-    char line[1024];
+    char line[1024] = {0};
     int  lineno = 0;
 
     while (fgets(line, sizeof(line), f)) {
@@ -46,50 +42,34 @@ HintsFile load_hints_file(const std::string& path_) {
         rtrim(line);
 
         const char* p = ltrim(line);
-        if (*p == '\0' || *p == '#') {
+        if ((*p == '\0') || (*p == '#')) {
             continue;
         }
 
-        /* ── Exclusion line: !name ──────────────────────────────────────── */
-        /*
-         * A line whose first non-whitespace character is '!' declares a
-         * false-positive suppression.  The name is the token immediately
-         * after '!'; the rest of the line is ignored (may hold a comment).
-         *
-         * Anything following the name token on the same line is silently
-         * ignored so that inline comments work without requiring a '#':
-         *
-         *   !snappy          embedded test data triggered the byte pattern
-         *   !opencv          # confirmed false positive via nm(1) inspection
-         */
         if (*p == '!') {
             p++;  /* skip '!' */
             const char* name_start = p;
-            while (*p && (unsigned char)*p > ' ') {
+            while ((*p) && ((unsigned char)*p > ' ')) {
                 p++;
             }
+
             std::string name(name_start, p);
-            if (name.empty() || name.size() > 128) {
-                fprintf(stderr,
-                        "[warn] hints file line %d: invalid exclusion name, skipped\n",
-                        lineno);
+            if ((name.empty()) || (name.size() > 128)) {
+                fprintf(stderr, "[warn] hints file line %d: invalid exclusion name, skipped\n", lineno);
                 continue;
             }
             result._excludes.insert(name);
             continue;
         }
-
-        /* ── Positive hint: name [version [license]] ────────────────────── */
-
         /* Token 1: product name */
         const char* name_start = p;
-        while (*p && (unsigned char)*p > ' ') {
+        while ((*p) && ((unsigned char)*p > ' ')) {
             p++;
         }
+
         std::string name(name_start, p);
-        if (name.empty() || name.size() > 128) {
-            fprintf(stderr, "[warn] hints file line %d: invalid name, skipped\n",
-                    lineno);
+        if ((name.empty()) || (name.size() > 128)) {
+            fprintf(stderr, "[warn] hints file line %d: invalid name, skipped\n", lineno);
             continue;
         }
 
@@ -97,15 +77,15 @@ HintsFile load_hints_file(const std::string& path_) {
 
         /* Token 2: version (optional) */
         std::string version;
-        if (*p != '\0' && *p != '#') {
+        if ((*p != '\0') && (*p != '#')) {
             const char* ver_start = p;
-            while (*p && (unsigned char)*p > ' ') {
+            while ((*p) && ((unsigned char)*p > ' ')) {
                 p++;
             }
             std::string v(ver_start, p);
 
             /* '-' and '?' are placeholders meaning "version unknown" */
-            if (v != "-" && v != "?") {
+            if ((v != "-") && (v != "?")) {
                 version = std::move(v);
             }
 
@@ -114,7 +94,7 @@ HintsFile load_hints_file(const std::string& path_) {
 
         /* Token 3+: SPDX license expression (rest of line) */
         std::string license;
-        if (*p != '\0' && *p != '#') {
+        if ((*p != '\0') && (*p != '#')) {
             license = p;
             rtrim_str(license);
         }
@@ -124,7 +104,8 @@ HintsFile load_hints_file(const std::string& path_) {
 
     fclose(f);
 
-    fprintf(stderr, "Loaded %zu hint(s), %zu exclusion(s) from %s\n",
-            result._libs.size(), result._excludes.size(), path_.c_str());
+    fprintf(stderr, "Loaded %zu hint(s), %zu exclusion(s) from %s\n", result._libs.size(), 
+                                                                      result._excludes.size(),
+                                                                      path_.c_str());
     return result;
 }

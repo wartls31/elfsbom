@@ -14,7 +14,6 @@
 #include <gelf.h>
 #include <libelf.h>
 
-/* ── Architecture / ABI helpers ─────────────────────────────────────────── */
 
 static const char* arch_name(uint16_t m_) {
     switch (m_) {
@@ -70,21 +69,20 @@ static std::vector<std::string> split_colon(const char* s_) {
     return v;
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
+/* 
  * Static library detection via symbol analysis
  *
- * We distinguish two evidence levels:
+ * Two evidence levels:
  *
  *   "symbol-defined"  (HIGH confidence)
  *      A symbol matching the pattern has st_shndx != SHN_UNDEF, meaning the
- *      function body is PRESENT in this binary — clear sign of static linking.
+ *      function body is PRESENT in this binary -> clear sign of static linking.
  *
  *   "symbol-ref"  (MEDIUM confidence)
- *      The symbol appears in the dynamic symbol table as SHN_UNDEF (an
- *      unresolved external reference).  Combined with the absence of a
- *      matching DT_NEEDED entry it suggests static linking, but could also
+ *      The symbol appears in the dynamic symbol table as SHN_UNDEF (an unresolved external reference). 
+ *      Combined with the absence of a matching DT_NEEDED entry it suggests static linking, but could also
  *      be a lazy binding that gets resolved elsewhere.
- * ════════════════════════════════════════════════════════════════════════════ */
+ */
 
 struct LibHint {
     const char* _prefix;
@@ -247,8 +245,6 @@ static void detect_from_symbols(const std::set<std::string>& defined_syms_,
     }
 }
 
-/* ── DWARF CU source path reader ─────────────────────────────────────────── */
-
 static void read_dwarf_sources(const std::string& path_,
                                 std::vector<std::string>& sources_) {
     int fd = open(path_.c_str(), O_RDONLY);
@@ -291,8 +287,6 @@ static void read_dwarf_sources(const std::string& path_,
     dwarf_end(dw);
     close(fd);
 }
-
-/* ── Main entry point ────────────────────────────────────────────────────── */
 
 bool parse_elf_file(const std::string& path_, Component& comp_) {
     comp_._path = path_;
@@ -512,9 +506,7 @@ bool parse_elf_file(const std::string& path_, Component& comp_) {
         comp_._is_pie = true;
     }
 
-    comp_._name = comp_._soname.empty()
-                ? path_.substr(path_.rfind('/') + 1)
-                : comp_._soname;
+    comp_._name = comp_._soname.empty() ? path_.substr(path_.rfind('/') + 1): comp_._soname;
 
     elf_end(elf);
     close(fd);
