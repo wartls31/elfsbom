@@ -1,0 +1,4 @@
+build/
+elf-sbom
+*.o
+*.d
